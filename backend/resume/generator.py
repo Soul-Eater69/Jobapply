@@ -1,6 +1,6 @@
 """
 AI-powered resume generator.
-Uses Claude to tailor the user's base profile to each job description,
+Uses OpenAI to tailor the user's base profile to each job description,
 then builds an ATS-friendly PDF.
 """
 import asyncio
@@ -43,7 +43,7 @@ class ResumeGenerator:
         ats_score = (len(matched_skills) / len(required_skills) * 100) if required_skills else 75.0
         ats_score = round(ats_score, 1)
 
-        # Generate tailored resume content via Claude
+        # Generate tailored resume content via OpenAI
         resume_content = await self._generate_with_ai(job, jd_data, profile, matched_skills, missing_skills)
 
         # Build PDF
@@ -78,14 +78,14 @@ class ResumeGenerator:
         matched_skills: list,
         missing_skills: list,
     ) -> dict:
-        """Use Claude to generate tailored resume sections."""
+        """Use OpenAI to generate tailored resume sections."""
 
-        if not settings.ANTHROPIC_API_KEY:
+        if not settings.OPENAI_API_KEY:
             return self._fallback_resume(profile, job, matched_skills)
 
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+            from openai import OpenAI
+            client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
             prompt = self._build_prompt(job, jd_data, profile, matched_skills)
 
@@ -93,14 +93,22 @@ class ResumeGenerator:
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None,
-                lambda: client.messages.create(
-                    model="claude-sonnet-4-6",
+                lambda: client.chat.completions.create(
+                    model=settings.OPENAI_MODEL,
                     max_tokens=3000,
-                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.4,
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are an expert resume writer and ATS optimization specialist. Always respond with valid JSON only.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
                 )
             )
 
-            raw = response.content[0].text.strip()
+            raw = response.choices[0].message.content.strip()
             return self._parse_ai_response(raw, profile)
 
         except Exception as e:

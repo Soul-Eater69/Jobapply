@@ -91,8 +91,8 @@ class FormFiller:
         return None
 
     async def _ai_answer(self, question: str, context: str = "") -> str:
-        """Use Claude to answer open-ended application questions."""
-        if not settings.ANTHROPIC_API_KEY:
+        """Use OpenAI to answer open-ended application questions."""
+        if not settings.OPENAI_API_KEY:
             return self.profile.get("default_cover_letter", "I am very interested in this position.")
 
         cache_key = question[:100]
@@ -100,8 +100,8 @@ class FormFiller:
             return self._ai_cache[cache_key]
 
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+            from openai import OpenAI
+            client = OpenAI(api_key=settings.OPENAI_API_KEY)
             profile_summary = f"""
 Name: {self.profile.get('first_name')} {self.profile.get('last_name')}
 Role: {self.profile.get('current_role', 'Software Engineer')}
@@ -120,12 +120,16 @@ Question: {question}
 Write a concise, genuine answer (1-3 sentences max unless a cover letter is requested).
 Be specific and professional. Do not use generic filler phrases."""
 
-            msg = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+            response = client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
                 max_tokens=500,
-                messages=[{"role": "user", "content": prompt}],
+                temperature=0.5,
+                messages=[
+                    {"role": "system", "content": "You are a professional job applicant. Be concise and genuine."},
+                    {"role": "user", "content": prompt},
+                ],
             )
-            answer = msg.content[0].text.strip()
+            answer = response.choices[0].message.content.strip()
             self._ai_cache[cache_key] = answer
             return answer
         except Exception as e:

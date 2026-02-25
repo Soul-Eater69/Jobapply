@@ -256,7 +256,8 @@ export default function SettingsPage({ context }) {
           Edit it directly to set credentials securely.
         </p>
         <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 text-xs font-mono space-y-1 text-gray-400">
-          <div>ANTHROPIC_API_KEY=sk-ant-...</div>
+          <div>OPENAI_API_KEY=sk-proj-...</div>
+          <div>OPENAI_MODEL=gpt-4o &nbsp;<span className="text-gray-600"># or gpt-4o-mini</span></div>
           <div>LINKEDIN_EMAIL=your@email.com</div>
           <div>LINKEDIN_PASSWORD=yourpassword</div>
           <div>INDEED_EMAIL=your@email.com</div>
