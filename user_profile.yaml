@@ -1,0 +1,141 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# JobApply AI — User Profile
+# Fill this out completely for best results.
+# The AI resume generator uses this as the base for all tailored resumes.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Personal Info
+first_name: "John"
+last_name: "Doe"
+email: "john.doe@example.com"
+phone: "+1 (555) 000-0000"
+
+address:
+  street: "123 Main St"
+  city: "San Francisco"
+  state: "CA"
+  zip: "94101"
+  country: "United States"
+
+# Online Profiles
+linkedin_url: "https://linkedin.com/in/johndoe"
+github_url: "https://github.com/johndoe"
+portfolio_url: "https://johndoe.dev"
+
+# Professional Summary (base text, AI will tailor per job)
+summary: >
+  Full-stack software engineer with 5+ years of experience building scalable
+  web applications and distributed systems. Passionate about clean code,
+  performance optimization, and delivering high-quality products.
+
+# Current / Target Role
+current_role: "Senior Software Engineer"
+years_experience: 5
+
+# Desired Job Settings
+desired_salary: "$150,000 - $180,000"
+current_salary: "$120,000"
+notice_period: "2 weeks"
+availability: "Immediately"
+earliest_start_date: "Immediately"
+
+# Work Authorization
+work_authorization: "Yes"  # or "No" / "Will need sponsorship"
+requires_sponsorship: "No"
+gender_disclosure: "Prefer not to say"
+ethnicity_disclosure: "Prefer not to say"
+
+# Technical Skills (order matters — put strongest first)
+skills:
+  - Python
+  - JavaScript
+  - TypeScript
+  - React
+  - Node.js
+  - FastAPI
+  - Django
+  - PostgreSQL
+  - Redis
+  - Docker
+  - Kubernetes
+  - AWS
+  - Git
+  - GraphQL
+  - REST APIs
+  - SQL
+  - MongoDB
+  - Linux
+  - CI/CD
+  - Agile
+
+# Work Experience (reverse chronological)
+experience:
+  - title: "Senior Software Engineer"
+    company: "TechCorp Inc."
+    duration: "Jan 2022 – Present"
+    location: "San Francisco, CA"
+    highlights:
+      - "Led development of microservices architecture serving 2M+ daily active users"
+      - "Reduced API latency by 40% through caching strategies and query optimization"
+      - "Mentored team of 4 junior engineers and conducted 50+ code reviews"
+      - "Built real-time data pipeline processing 500K events/day using Kafka + Python"
+      - "Deployed infrastructure on AWS EKS reducing costs by 25%"
+
+  - title: "Software Engineer"
+    company: "StartupXYZ"
+    duration: "Jun 2020 – Dec 2021"
+    location: "Remote"
+    highlights:
+      - "Built full-stack React/Node.js platform from 0 to 50K users in 12 months"
+      - "Designed and implemented RESTful APIs consumed by mobile and web clients"
+      - "Improved test coverage from 30% to 85%, reducing production bugs by 60%"
+      - "Integrated third-party payment APIs (Stripe) processing $1M+ monthly"
+
+  - title: "Junior Software Engineer"
+    company: "Agency Co."
+    duration: "Aug 2019 – May 2020"
+    location: "New York, NY"
+    highlights:
+      - "Developed client-facing web applications using React and Django"
+      - "Collaborated with designers to implement pixel-perfect UI components"
+      - "Maintained CI/CD pipelines using GitHub Actions and Docker"
+
+# Projects
+projects:
+  - name: "OpenTrack"
+    description: "Open-source project management tool with real-time collaboration, used by 500+ teams"
+    tech: ["React", "FastAPI", "PostgreSQL", "WebSocket", "Docker"]
+    url: "https://github.com/johndoe/opentrack"
+
+  - name: "DataPulse"
+    description: "Real-time analytics dashboard processing 1M+ events/day with sub-100ms query response"
+    tech: ["Python", "Kafka", "ClickHouse", "React", "Redis"]
+    url: "https://github.com/johndoe/datapulse"
+
+  - name: "AuthKit"
+    description: "Lightweight authentication library for Node.js with JWT, OAuth2, and MFA support"
+    tech: ["Node.js", "TypeScript", "Redis", "PostgreSQL"]
+    url: "https://github.com/johndoe/authkit"
+
+# Education
+education:
+  - degree: "Bachelor of Science"
+    field: "Computer Science"
+    school: "University of California, Berkeley"
+    year: "2019"
+    gpa: "3.7"
+
+# Certifications (optional)
+certifications:
+  - name: "AWS Solutions Architect – Associate"
+    issuer: "Amazon Web Services"
+    year: 2023
+  - name: "Google Cloud Professional Data Engineer"
+    issuer: "Google"
+    year: 2022
+
+# Default Cover Letter (used as fallback when AI is unavailable)
+default_cover_letter: >
+  I am excited to apply for this position. My background in software engineering
+  and passion for building scalable systems makes me a strong fit for your team.
+  I look forward to contributing to your mission.
