@@ -87,20 +87,21 @@ class JDParser:
         found = set()
         text_lower = text.lower()
 
-        # Find required vs preferred section
+        # Find required vs preferred section.
+        # Boundary: next double-newline, next section header, or end of string.
+        SECTION_BOUNDARY = r"(?=\n{2,}|\n[A-Z][A-Za-z ]{3,}:|\Z)"
         if required:
-            # Look for required section
             req_match = re.search(
-                r"(required|must.have|qualifications?|requirements?)[:\s]*\n(.*?)(?=\n\n|\Z)",
+                r"(?:required|must[- ]have|qualifications?|requirements?)[:\s]*\n(.*?)" + SECTION_BOUNDARY,
                 text, re.DOTALL | re.IGNORECASE
             )
-            search_text = req_match.group(2).lower() if req_match else text_lower[:len(text_lower)//2]
+            search_text = req_match.group(1).lower() if req_match else text_lower[:len(text_lower)//2]
         else:
             pref_match = re.search(
-                r"(preferred|nice.to.have|bonus|plus|desired)[:\s]*\n(.*?)(?=\n\n|\Z)",
+                r"(?:preferred|nice[- ]to[- ]have|bonus|plus|desired)[:\s]*\n(.*?)" + SECTION_BOUNDARY,
                 text, re.DOTALL | re.IGNORECASE
             )
-            search_text = pref_match.group(2).lower() if pref_match else text_lower[len(text_lower)//2:]
+            search_text = pref_match.group(1).lower() if pref_match else text_lower[len(text_lower)//2:]
 
         for skill in TECH_SKILLS | SOFT_SKILLS:
             # Use word boundary for short skills

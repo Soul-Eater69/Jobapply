@@ -94,6 +94,7 @@ async def run_automation_loop(
         while state["running"]:
             scan_count += 1
             state["last_check"] = datetime.utcnow()
+            state["jobs_found"] = 0  # Reset per-cycle counter
             state["current_action"] = "Scanning job boards..."
             await broadcast({"type": "status", "data": {
                 "current_action": state["current_action"],

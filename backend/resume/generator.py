@@ -31,8 +31,8 @@ class ResumeGenerator:
 
         # Parse JD
         jd_data = self.parser.parse(jd_text) if jd_text else {}
-        required_skills = jd_data.get("tech_stack", []) + jd_data.get("required_skills", [])
-        preferred_skills = jd_data.get("preferred_skills", [])
+        required_skills = (jd_data.get("tech_stack") or []) + (jd_data.get("required_skills") or [])
+        preferred_skills = jd_data.get("preferred_skills") or []
         user_skills = [s.lower() for s in profile.get("skills", [])]
 
         # Match skills

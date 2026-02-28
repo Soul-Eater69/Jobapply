@@ -8,7 +8,7 @@ import random
 from typing import Tuple
 
 from .base import BaseApplier
-from .stealth_browser import StealthBrowser, human_type, human_click, poisson_delay, random_scroll
+from .stealth_browser import StealthBrowser, human_type_element, human_click, poisson_delay, random_scroll, detect_captcha
 from .form_filler import FormFiller
 from ..config import settings
 
@@ -34,6 +34,9 @@ class IndeedApplier(BaseApplier):
                 await random_scroll(page)
 
                 current_url = page.url
+
+                if await detect_captcha(page):
+                    return False, "CAPTCHA detected on Indeed"
 
                 # Check if redirected to external site
                 if "indeed.com" not in current_url:
@@ -88,7 +91,8 @@ class IndeedApplier(BaseApplier):
             await page.goto(INDEED_LOGIN_URL, wait_until="domcontentloaded", timeout=20000)
             await poisson_delay(1.5)
 
-            await human_type(page, "input[type='email']", settings.INDEED_EMAIL)
+            email_el = await page.wait_for_selector("input[type='email']", timeout=10000)
+            await human_type_element(email_el, settings.INDEED_EMAIL)
             await poisson_delay(0.5)
 
             continue_btn = await page.query_selector("button:has-text('Continue')")
@@ -96,7 +100,8 @@ class IndeedApplier(BaseApplier):
                 await continue_btn.click()
                 await poisson_delay(1.5)
 
-            await human_type(page, "input[type='password']", settings.INDEED_PASSWORD)
+            password_el = await page.wait_for_selector("input[type='password']", timeout=10000)
+            await human_type_element(password_el, settings.INDEED_PASSWORD)
             await poisson_delay(0.5)
 
             signin_btn = await page.query_selector("button:has-text('Sign in')")

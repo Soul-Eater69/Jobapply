@@ -218,11 +218,10 @@ class JobQueueManager:
                     source = item.job.get("source", "default")
                     await self.rate_limiter.acquire(source)
 
-                    # Check application limit
+                    # Check application limit — stop dispatching, don't spin-wait
                     if self.stats["applied"] >= config.max_applications_per_run:
-                        logger.info("Max applications reached, pausing dispatcher")
-                        await asyncio.sleep(60)
-                        continue
+                        logger.info("Max applications reached, dispatcher stopping")
+                        break
 
                     # Jobs go to agent queue first (AI decision layer)
                     await self._agent_queue.put(item)
@@ -274,8 +273,10 @@ class JobQueueManager:
 
             except Exception as e:
                 logger.error(f"[{worker_id}] Agent error: {e}", exc_info=True)
-                # Fail open: push to resume queue anyway
-                await self._resume_queue.put(item)
+                # Dead-letter on agent failure — don't apply unevaluated jobs
+                job["failure_reason"] = f"Agent pipeline error: {str(e)[:200]}"
+                self._dead_letter.append(job)
+                self.stats["dead_letters"] += 1
             finally:
                 self._agent_queue.task_done()
 

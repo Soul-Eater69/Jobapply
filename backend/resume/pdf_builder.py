@@ -114,8 +114,9 @@ class PDFBuilder:
             url = profile["portfolio_url"].replace("https://", "").replace("http://", "")
             contact_parts.append(url)
         addr = profile.get("address", {})
-        if addr.get("city"):
-            contact_parts.append(f"{addr.get('city')}, {addr.get('state', '')}")
+        city_state = ", ".join(filter(None, [addr.get("city"), addr.get("state")]))
+        if city_state:
+            contact_parts.append(city_state)
 
         story.append(Paragraph(" | ".join(contact_parts), STYLES["contact"]))
 

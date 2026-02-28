@@ -8,7 +8,7 @@ import random
 from typing import Tuple
 
 from .base import BaseApplier
-from .stealth_browser import StealthBrowser, human_type, human_click, poisson_delay, random_scroll
+from .stealth_browser import StealthBrowser, human_type_element, human_click, human_click_element, poisson_delay, random_scroll, detect_captcha
 from .form_filler import FormFiller
 from ..config import settings, load_user_profile
 
@@ -42,6 +42,10 @@ class LinkedInApplier(BaseApplier):
                 await poisson_delay(2.0)
                 await page.goto(job["job_url"], wait_until="domcontentloaded", timeout=30000)
                 await poisson_delay(1.5)
+
+                if await detect_captcha(page):
+                    return False, "CAPTCHA detected on job page"
+
                 await random_scroll(page)
 
                 # Find Easy Apply button
@@ -63,8 +67,13 @@ class LinkedInApplier(BaseApplier):
                 if not easy_apply_btn:
                     return False, "No Easy Apply button found"
 
-                await human_click(page, None)
-                await easy_apply_btn.click()
+                # Check if already applied (LinkedIn shows "Withdraw" when already applied)
+                already_applied = await page.query_selector("button:has-text('Withdraw'), .jobs-apply-button--withdrawn")
+                if already_applied:
+                    return False, "Already applied to this job"
+
+                await easy_apply_btn.scroll_into_view_if_needed()
+                await human_click_element(page, easy_apply_btn, browser=None)
                 await poisson_delay(1.5)
 
                 # Handle multi-step form
@@ -86,14 +95,20 @@ class LinkedInApplier(BaseApplier):
             await page.goto(LINKEDIN_LOGIN_URL, wait_until="domcontentloaded", timeout=20000)
             await poisson_delay(1.5)
 
-            await human_type(page, "#username", settings.LINKEDIN_EMAIL)
+            username_el = await page.wait_for_selector("#username", timeout=10000)
+            await human_type_element(username_el, settings.LINKEDIN_EMAIL)
             await poisson_delay(0.8)
-            await human_type(page, "#password", settings.LINKEDIN_PASSWORD)
+            password_el = await page.wait_for_selector("#password", timeout=10000)
+            await human_type_element(password_el, settings.LINKEDIN_PASSWORD)
             await poisson_delay(0.5)
 
             await human_click(page, "button[type='submit']")
             await page.wait_for_load_state("networkidle", timeout=15000)
             await poisson_delay(2.0)
+
+            if await detect_captcha(page):
+                logger.warning("CAPTCHA detected during LinkedIn login")
+                return False
 
             # Verify login
             return await self._check_logged_in(page)

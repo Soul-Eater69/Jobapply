@@ -5,12 +5,13 @@ Uses AI to answer open-ended questions.
 """
 import asyncio
 import logging
+import random
 import re
 from typing import Optional
 
 from playwright.async_api import Page
 
-from .stealth_browser import human_type, human_click, poisson_delay
+from .stealth_browser import human_type_element, human_click, poisson_delay
 from ..config import load_user_profile, settings
 
 logger = logging.getLogger(__name__)
@@ -175,8 +176,7 @@ Be specific and professional. Do not use generic filler phrases."""
                         value = await self._ai_answer(label, job.get("description", "")[:500])
 
                 if value:
-                    await human_type(page, None, value, clear_first=False)  # inp handled below
-                    await inp.fill(value)
+                    await human_type_element(inp, value, clear_first=False)
                     await asyncio.sleep(random.uniform(0.2, 0.6))
                     filled_any = True
             except Exception as e:
@@ -195,18 +195,24 @@ Be specific and professional. Do not use generic filler phrases."""
 
                 value = self._get_field_value(label)
                 if value:
-                    # Try exact match, then partial
+                    # Prefer exact match; fall back to substring only if no exact hit.
+                    # This prevents "Java" from matching "JavaScript".
                     options = await sel.query_selector_all("option")
-                    best = None
+                    exact_match = None
+                    partial_match = None
+                    val_lower = value.lower()
                     for opt in options:
                         opt_text = (await opt.text_content() or "").strip().lower()
                         opt_val = (await opt.get_attribute("value") or "").lower()
-                        if value.lower() in opt_text or opt_text in value.lower():
-                            best = await opt.get_attribute("value") or opt_text
+                        if opt_text == val_lower or opt_val == val_lower:
+                            exact_match = await opt.get_attribute("value") or opt_text
                             break
+                        if partial_match is None and (val_lower in opt_text or opt_text in val_lower):
+                            partial_match = await opt.get_attribute("value") or opt_text
 
-                    if best:
-                        await sel.select_option(value=best)
+                    chosen = exact_match or partial_match
+                    if chosen:
+                        await sel.select_option(value=chosen)
                         await asyncio.sleep(random.uniform(0.2, 0.5))
                         filled_any = True
             except Exception as e:
@@ -224,8 +230,11 @@ Be specific and professional. Do not use generic filler phrases."""
                     continue
 
                 label_lower = label.lower()
-                # Check boxes that indicate agreement/acceptance
-                if any(w in label_lower for w in ["agree", "confirm", "acknowledge", "certif", "accept"]):
+                # Check boxes that indicate positive agreement/acceptance,
+                # but skip if the label contains negative phrasing (opt-out, do not agree, etc.)
+                has_agreement = any(w in label_lower for w in ["agree", "confirm", "acknowledge", "certif", "accept"])
+                has_negative = any(w in label_lower for w in ["do not", "don't", "not agree", "opt out", "decline", "refuse", "no marketing", "unsubscribe"])
+                if has_agreement and not has_negative:
                     if not await cb.is_checked():
                         await cb.check()
                         await asyncio.sleep(random.uniform(0.2, 0.4))
@@ -309,6 +318,3 @@ Be specific and professional. Do not use generic filler phrases."""
             logger.error(f"Resume upload failed: {e}")
 
         return False
-
-
-import random
