@@ -65,16 +65,25 @@ class AutomationConfig(BaseModel):
     job_types: Optional[List[str]] = None
     max_applications_per_run: int = 20
     max_applications_per_day: int = 50
-    sources: List[str] = ["linkedin", "indeed", "glassdoor", "dice"]
-    check_interval_minutes: int = 30
+    # Tier 1 (ATS-direct) + Tier 2 (watchlist) + Tier 3 (aggregators)
+    sources: List[str] = [
+        # Tier 1: ATS-direct (2-24h before LinkedIn)
+        "greenhouse", "lever", "ashby", "remotive", "weworkremotely", "dice", "ziprecruiter",
+        # Tier 2: Company watchlist (checks all ATS for target_companies)
+        "watchlist",
+        # Tier 3: Aggregators (high competition, run every other cycle)
+        "linkedin", "indeed", "glassdoor",
+    ]
+    check_interval_minutes: int = 15             # 15min default (was 30min)
     min_ats_score: float = 60.0
-    min_fit_score: float = 65.0      # Agent fit threshold (0-100)
+    min_fit_score: float = 65.0                  # Agent fit threshold (0-100)
     auto_apply: bool = True
     remote_only: bool = False
     salary_min: Optional[int] = None
     experience_level: Optional[List[str]] = None  # entry, mid, senior
     enable_cover_letter: bool = True              # Generate cover letter per job
-    followup_after_days: int = 7                 # Days before follow-up email
+    enable_signals: bool = True                   # Hiring signal detection at startup
+    followup_after_days: int = 7                  # Days before follow-up email
 
 
 class RunStatus(BaseModel):

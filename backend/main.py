@@ -441,6 +441,67 @@ def get_cover_letter(job_id: int, db: Session = Depends(get_db)):
     return FileResponse(str(path), media_type="text/plain", filename=path.name)
 
 
+# ─── Outreach Endpoints ───────────────────────────────────────────────────────
+
+@app.post("/api/outreach/signal")
+async def generate_signal_outreach(body: dict):
+    """
+    Generate a cold outreach message triggered by a hiring signal.
+
+    Body: { company, signal_summary, signal_type, predicted_roles }
+    """
+    from .agents.outreach import OutreachAgent
+    agent = OutreachAgent()
+    result = await agent.generate_signal_outreach(
+        company=body.get("company", ""),
+        signal={
+            "signal_summary": body.get("signal_summary", ""),
+            "signal_type": body.get("signal_type", "growth"),
+            "predicted_roles": body.get("predicted_roles", []),
+        },
+    )
+    return result
+
+
+@app.post("/api/outreach/speculative")
+async def generate_speculative_outreach(body: dict):
+    """
+    Generate a speculative cold outreach message for a watchlist company.
+
+    Body: { company, department?, why_company? }
+    """
+    from .agents.outreach import OutreachAgent
+    agent = OutreachAgent()
+    result = await agent.generate_speculative_outreach(
+        company=body.get("company", ""),
+        department=body.get("department", "Engineering"),
+        why_company=body.get("why_company", ""),
+    )
+    return result
+
+
+@app.post("/api/signals/detect")
+async def detect_signals(body: dict):
+    """
+    Run hiring signal detection for a list of companies.
+
+    Body: { companies: [], keywords: [], experience_level? }
+    Returns companies with active hiring signals.
+    """
+    from .agents.signal_detector import HiringSignalDetector
+    detector = HiringSignalDetector()
+    signals = await detector.detect(
+        companies=body.get("companies", [])[:30],
+        keywords=body.get("keywords", []),
+        experience_level=body.get("experience_level"),
+    )
+    return {
+        "signals": signals,
+        "count": len(signals),
+        "formatted": detector.format_for_broadcast(signals),
+    }
+
+
 # Serve frontend in production
 frontend_dist = BASE_DIR / "frontend" / "dist"
 if frontend_dist.exists():

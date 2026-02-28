@@ -15,6 +15,8 @@ from .job_fit import JobFitAgent
 from .cover_letter import CoverLetterAgent
 from .company_research import CompanyResearchAgent
 from .followup import FollowUpAgent
+from .signal_detector import HiringSignalDetector
+from .outreach import OutreachAgent
 
 __all__ = [
     "AgentOrchestrator",
@@ -22,4 +24,6 @@ __all__ = [
     "CoverLetterAgent",
     "CompanyResearchAgent",
     "FollowUpAgent",
+    "HiringSignalDetector",
+    "OutreachAgent",
 ]

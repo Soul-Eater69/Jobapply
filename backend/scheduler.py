@@ -1,7 +1,23 @@
 """
 Automation scheduler.
-Orchestrates scrapers → priority queue → resume workers → apply workers.
+
+Orchestrates a tiered, proactive sourcing pipeline:
+
+  Tier 1 — ATS Direct (Lever, Ashby, Greenhouse, Remotive, Dice, ZipRecruiter)
+            Jobs appear here before LinkedIn aggregates them (2-24h advantage).
+
+  Tier 2 — Company Watchlist
+            Monitor user-specified target companies across ALL ATS platforms.
+
+  Tier 3 — Aggregators (LinkedIn, Indeed, Glassdoor)
+            High competition, wide coverage. Run every other scan cycle.
+
+  Tier 4 — Hiring Signals + Direct Outreach (session startup only)
+            Detect companies showing hiring signals before a role is posted.
+
+All scraped jobs flow: Scraper → AI Agent Pipeline → Resume → Apply
 """
+
 import asyncio
 import logging
 from datetime import datetime
@@ -19,6 +35,39 @@ logger = logging.getLogger(__name__)
 # Global queue instance
 _queue: JobQueueManager = None
 
+# ── Scraper Registry ──────────────────────────────────────────────────────────
+
+TIER1_SOURCES = {
+    # ATS-direct: jobs appear hours before LinkedIn/Indeed
+    "greenhouse":     "scraper.greenhouse.GreenhouseScraper",
+    "lever":          "scraper.lever.LeverScraper",
+    "ashby":          "scraper.ashby.AshbyScraper",
+    "remotive":       "scraper.remotive.RemotiveScraper",
+    "weworkremotely": "scraper.weworkremotely.WeWorkRemotelyScraper",
+    "dice":           "scraper.dice.DiceScraper",
+    "ziprecruiter":   "scraper.ziprecruiter.ZipRecruiterScraper",
+}
+
+TIER2_SOURCES = {
+    "watchlist": "scraper.company_watchlist.CompanyWatchlistScraper",
+}
+
+TIER3_SOURCES = {
+    "linkedin":  "scraper.linkedin.LinkedInScraper",
+    "indeed":    "scraper.indeed.IndeedScraper",
+    "glassdoor": "scraper.glassdoor.GlassdoorScraper",
+}
+
+ALL_SOURCES = {**TIER1_SOURCES, **TIER2_SOURCES, **TIER3_SOURCES}
+
+
+def _load_scraper(dotted_path: str):
+    """Lazily import a scraper class from a dotted module path."""
+    from importlib import import_module
+    module_path, cls_name = dotted_path.rsplit(".", 1)
+    module = import_module(f".{module_path}", package=__package__)
+    return getattr(module, cls_name)
+
 
 async def run_automation_loop(
     config: AutomationConfig,
@@ -28,32 +77,22 @@ async def run_automation_loop(
 ):
     global _queue
 
-    from .scraper.linkedin import LinkedInScraper
-    from .scraper.indeed import IndeedScraper
-    from .scraper.glassdoor import GlassdoorScraper
-    from .scraper.dice import DiceScraper
-    from .scraper.remotive import RemotiveScraper
-    from .scraper.weworkremotely import WeWorkRemotelyScraper
-    from .scraper.ziprecruiter import ZipRecruiterScraper
-    from .scraper.greenhouse import GreenhouseScraper
-
-    SCRAPER_REGISTRY = {
-        "linkedin": LinkedInScraper,
-        "indeed": IndeedScraper,
-        "glassdoor": GlassdoorScraper,
-        "dice": DiceScraper,
-        "remotive": RemotiveScraper,
-        "weworkremotely": WeWorkRemotelyScraper,
-        "ziprecruiter": ZipRecruiterScraper,
-        "greenhouse": GreenhouseScraper,
-    }
-
-    # Initialize queue with workers
-    _queue = JobQueueManager(max_apply_workers=2, max_resume_workers=3)
+    # Initialize queue with agent + resume + apply workers
+    _queue = JobQueueManager(max_apply_workers=2, max_resume_workers=3, max_agent_workers=2)
     await _queue.start(config, SessionLocal, broadcast)
+
+    # ── Tier 4: Hiring signal detection (once at session start) ───────────
+    if config.target_companies and getattr(config, "enable_signals", True):
+        asyncio.create_task(
+            _run_signal_detection(config, broadcast),
+            name="signal-detector",
+        )
+
+    scan_count = 0
 
     try:
         while state["running"]:
+            scan_count += 1
             state["last_check"] = datetime.utcnow()
             state["current_action"] = "Scanning job boards..."
             await broadcast({"type": "status", "data": {
@@ -61,62 +100,39 @@ async def run_automation_loop(
                 "running": True,
             }})
 
+            enabled = set(config.sources)
             all_jobs = []
 
-            # ── Scrape all enabled sources ────────────────────────────────
-            for source in config.sources:
-                scraper_cls = SCRAPER_REGISTRY.get(source)
-                if not scraper_cls:
-                    continue
+            # ── Tier 1: ATS-direct ────────────────────────────────────────
+            tier1 = [s for s in enabled if s in TIER1_SOURCES]
+            if tier1:
+                jobs = await _scrape_sources(
+                    tier1, TIER1_SOURCES, config,
+                    max_age_hours=2, state=state, broadcast=broadcast,
+                )
+                all_jobs.extend(jobs)
 
-                state["current_action"] = f"Scraping {source}..."
+            # ── Tier 2: Company watchlist ─────────────────────────────────
+            if "watchlist" in enabled and config.target_companies:
                 await broadcast({"type": "log", "data": {
-                    "message": f"Scanning {source.title()}...",
+                    "message": f"Watching {len(config.target_companies)} target companies...",
                     "level": "info",
                 }})
+                jobs = await _scrape_sources(
+                    ["watchlist"], TIER2_SOURCES, config,
+                    max_age_hours=3, state=state, broadcast=broadcast,
+                )
+                all_jobs.extend(jobs)
 
-                try:
-                    scraper = scraper_cls()
-                    jobs = await scraper.search_jobs(
-                        keywords=config.search_keywords,
-                        locations=config.locations,
-                        max_age_hours=1,
-                        remote_only=config.remote_only,
-                        job_types=config.job_types,
-                        experience_levels=config.experience_level,
-                        target_companies=config.target_companies,
+            # ── Tier 3: Aggregators (every other cycle) ───────────────────
+            if scan_count % 2 == 0:
+                tier3 = [s for s in enabled if s in TIER3_SOURCES]
+                if tier3:
+                    jobs = await _scrape_sources(
+                        tier3, TIER3_SOURCES, config,
+                        max_age_hours=1, state=state, broadcast=broadcast,
                     )
-                    await scraper.close()
-
-                    # Company filters
-                    if config.target_companies:
-                        jobs = [j for j in jobs if any(
-                            c.lower() in j.get("company", "").lower()
-                            for c in config.target_companies
-                        )]
-
-                    if config.blocked_companies:
-                        jobs = [j for j in jobs if not any(
-                            c.lower() in j.get("company", "").lower()
-                            for c in config.blocked_companies
-                        )]
-
                     all_jobs.extend(jobs)
-                    state["jobs_found"] += len(jobs)
-
-                    await broadcast({"type": "log", "data": {
-                        "message": f"{source.title()}: found {len(jobs)} fresh jobs",
-                        "level": "success" if jobs else "info",
-                    }})
-
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    logger.error(f"Scraper error [{source}]: {e}", exc_info=True)
-                    await broadcast({"type": "log", "data": {
-                        "message": f"Scraper error [{source}]: {str(e)[:120]}",
-                        "level": "error",
-                    }})
 
             # ── Deduplicate against DB ────────────────────────────────────
             new_jobs = []
@@ -132,17 +148,19 @@ async def run_automation_loop(
                 db_session.close()
 
             await broadcast({"type": "log", "data": {
-                "message": f"New unique jobs this scan: {len(new_jobs)}",
+                "message": (
+                    f"New unique jobs this scan: {len(new_jobs)} "
+                    f"(total scraped: {len(all_jobs)})"
+                ),
                 "level": "info",
             }})
 
-            # ── Push to priority queue ────────────────────────────────────
+            # ── Push to priority queue → AI agent pipeline ────────────────
             if new_jobs:
                 _queue.push_jobs(new_jobs)
-                queue_stats = _queue.get_stats()
-                await broadcast({"type": "queue_stats", "data": queue_stats})
+                await broadcast({"type": "queue_stats", "data": _queue.get_stats()})
 
-            # ── Sync state from queue ─────────────────────────────────────
+            # ── Sync state ────────────────────────────────────────────────
             qs = _queue.get_stats()
             state["jobs_applied"] = qs["applied"]
             state["jobs_failed"] = qs["failed"]
@@ -153,11 +171,16 @@ async def run_automation_loop(
                 "jobs_applied": state["jobs_applied"],
                 "jobs_failed": state["jobs_failed"],
                 "queue_size": qs["queue_size"],
-                "current_action": f"Waiting {config.check_interval_minutes}min before next scan...",
-                "last_check": state["last_check"].isoformat() if state["last_check"] else None,
+                "agent_approved": qs.get("agent_approved", 0),
+                "agent_skipped": qs.get("agent_skipped", 0),
+                "current_action": (
+                    f"Next scan in {config.check_interval_minutes}min..."
+                ),
+                "last_check": (
+                    state["last_check"].isoformat() if state["last_check"] else None
+                ),
             }})
 
-            # ── Wait for next scan cycle ──────────────────────────────────
             await asyncio.sleep(config.check_interval_minutes * 60)
 
     except asyncio.CancelledError:
@@ -168,6 +191,109 @@ async def run_automation_loop(
             await _queue.stop()
         state["running"] = False
         state["current_action"] = "idle"
+
+
+async def _scrape_sources(
+    sources: list,
+    registry: dict,
+    config: AutomationConfig,
+    max_age_hours: int,
+    state: dict,
+    broadcast: Callable,
+) -> list:
+    """Run a list of scrapers and return all jobs collected."""
+    all_jobs = []
+    for source in sources:
+        dotted = registry.get(source)
+        if not dotted:
+            continue
+        state["current_action"] = f"Scanning {source}..."
+        await broadcast({"type": "log", "data": {
+            "message": f"Scanning {source.title()}...",
+            "level": "info",
+        }})
+        try:
+            cls = _load_scraper(dotted)
+            scraper = cls()
+            jobs = await scraper.search_jobs(
+                keywords=config.search_keywords,
+                locations=config.locations,
+                max_age_hours=max_age_hours,
+                remote_only=config.remote_only,
+                job_types=config.job_types,
+                experience_levels=config.experience_level,
+                target_companies=config.target_companies,
+            )
+            await scraper.close()
+
+            # Blocked company filter
+            if config.blocked_companies:
+                jobs = [
+                    j for j in jobs
+                    if not any(
+                        c.lower() in j.get("company", "").lower()
+                        for c in config.blocked_companies
+                    )
+                ]
+
+            all_jobs.extend(jobs)
+            state["jobs_found"] = state.get("jobs_found", 0) + len(jobs)
+
+            await broadcast({"type": "log", "data": {
+                "message": f"{source.title()}: {len(jobs)} fresh jobs",
+                "level": "success" if jobs else "info",
+            }})
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Scraper error [{source}]: {e}", exc_info=True)
+            await broadcast({"type": "log", "data": {
+                "message": f"Scraper error [{source}]: {str(e)[:120]}",
+                "level": "error",
+            }})
+
+    return all_jobs
+
+
+async def _run_signal_detection(config: AutomationConfig, broadcast: Callable):
+    """Run hiring signal detection once at session start."""
+    try:
+        from .agents.signal_detector import HiringSignalDetector
+        detector = HiringSignalDetector()
+
+        companies = (config.target_companies or [])[:30]
+        if not companies:
+            return
+
+        await broadcast({"type": "log", "data": {
+            "message": f"[Signals] Analyzing {len(companies)} companies for hiring signals...",
+            "level": "info",
+        }})
+
+        signals = await detector.detect(
+            companies=companies,
+            keywords=config.search_keywords,
+            experience_level=(config.experience_level or [None])[0],
+        )
+
+        if signals:
+            await broadcast({"type": "signals", "data": {
+                "signals": detector.format_for_broadcast(signals),
+                "count": len(signals),
+            }})
+            await broadcast({"type": "log", "data": {
+                "message": f"[Signals] {len(signals)} companies showing hiring signals",
+                "level": "success",
+            }})
+        else:
+            await broadcast({"type": "log", "data": {
+                "message": "[Signals] No strong signals detected for target companies",
+                "level": "info",
+            }})
+
+    except Exception as e:
+        logger.warning(f"Signal detection error: {e}")
 
 
 async def save_job(db: Session, job: dict, status: str, failure_reason: str = None):
