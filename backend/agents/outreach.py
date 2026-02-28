@@ -5,11 +5,6 @@ Generates personalized cold outreach messages to hiring managers at target
 companies — for roles that don't yet exist publicly. This is "Tier 4" in the
 proactive sourcing strategy, bypassing job postings entirely.
 
-Research shows:
-  - Referrals = 7% of applicants, 30-50% of hires
-  - Direct outreach response rate: 33-80% (vs 4-10% for cold applications)
-  - Outreach timed to hiring signals gets 2-3x normal response rates
-
 Two outreach modes:
   1. signal_outreach — triggered by a detected hiring signal (funding, etc.)
   2. speculative_outreach — proactive inquiry for companies on watchlist
@@ -18,7 +13,7 @@ Two outreach modes:
 import logging
 from typing import Optional
 
-import anthropic
+from openai import AsyncOpenAI
 
 from ..config import settings, load_user_profile
 
@@ -101,11 +96,11 @@ class OutreachAgent:
     """
 
     def __init__(self):
-        self._client: Optional[anthropic.AsyncAnthropic] = None
+        self._client: Optional[AsyncOpenAI] = None
 
-    def _get_client(self) -> anthropic.AsyncAnthropic:
+    def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
-            self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+            self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         return self._client
 
     async def generate_signal_outreach(
@@ -162,12 +157,15 @@ class OutreachAgent:
     async def _generate(self, prompt: str) -> dict:
         try:
             client = self._get_client()
-            msg = await client.messages.create(
-                model="claude-sonnet-4-6",
+            response = await client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
                 max_tokens=600,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": "You write concise, confident outreach messages. Plain text only."},
+                    {"role": "user", "content": prompt},
+                ],
             )
-            raw = msg.content[0].text.strip()
+            raw = response.choices[0].message.content.strip()
             return _parse_outreach(raw)
         except Exception as e:
             logger.warning(f"Outreach agent error: {e}")
@@ -182,21 +180,19 @@ class OutreachAgent:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _format_profile(profile: dict) -> str:
-    personal = profile.get("Personal", {})
-    prof = profile.get("Professional", {})
-    skills = profile.get("Skills", [])
-    experience = profile.get("Experience", [])
+    name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
+    experience = profile.get("experience", [])
 
     lines = [
-        f"Name: {personal.get('first_name', '')} {personal.get('last_name', '')}",
-        f"Current Role: {prof.get('current_role', '')}",
-        f"Years Experience: {prof.get('years_experience', '')}",
-        f"Top Skills: {', '.join(skills[:15])}",
-        f"Summary: {(prof.get('summary') or '')[:400]}",
+        f"Name: {name}",
+        f"Current Role: {profile.get('current_role', '')}",
+        f"Years Experience: {profile.get('years_experience', '')}",
+        f"Top Skills: {', '.join(profile.get('skills', [])[:15])}",
+        f"Summary: {(profile.get('summary') or '')[:400]}",
     ]
     if experience:
         top = experience[0]
-        highlights = " | ".join((top.get("highlights") or [])[:2])
+        highlights = " | ".join((top.get("highlights") or top.get("bullets") or [])[:2])
         lines.append(f"Most Recent: {top.get('title')} @ {top.get('company')} — {highlights}")
 
     return "\n".join(lines)

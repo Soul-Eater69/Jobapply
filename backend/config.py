@@ -22,9 +22,6 @@ class Settings:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
 
-    # Anthropic / Claude settings
-    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-
     # Agent settings
     MIN_FIT_SCORE: int = int(os.getenv("MIN_FIT_SCORE", "65"))
     FOLLOWUP_AFTER_DAYS: int = int(os.getenv("FOLLOWUP_AFTER_DAYS", "7"))

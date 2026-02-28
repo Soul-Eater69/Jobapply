@@ -1,15 +1,15 @@
 """
 Company Research Agent.
 
-Extracts company intelligence from the job description and Claude's knowledge
-to personalize cover letters and resumes. Uses Claude Haiku for speed and cost.
+Extracts company intelligence from the job description and GPT's knowledge
+to personalize cover letters and resumes. Uses gpt-4o-mini for speed and cost.
 """
 
 import json
 import logging
 from typing import Optional
 
-import anthropic
+from openai import AsyncOpenAI
 
 from ..config import settings
 
@@ -50,16 +50,16 @@ class CompanyResearchAgent:
     """
     Gathers company intelligence to personalize job applications.
 
-    Uses Claude Haiku (fast + cheap) to extract and synthesize company
+    Uses gpt-4o-mini (fast + cheap) to extract and synthesize company
     context from the job description text.
     """
 
     def __init__(self):
-        self._client: Optional[anthropic.AsyncAnthropic] = None
+        self._client: Optional[AsyncOpenAI] = None
 
-    def _get_client(self) -> anthropic.AsyncAnthropic:
+    def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
-            self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+            self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         return self._client
 
     async def research(self, job: dict) -> dict:
@@ -77,17 +77,16 @@ class CompanyResearchAgent:
 
         try:
             client = self._get_client()
-            msg = await client.messages.create(
-                model="claude-haiku-4-5-20251001",
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
                 max_tokens=600,
-                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": "You are a company research analyst. Respond only with valid JSON."},
+                    {"role": "user", "content": prompt},
+                ],
             )
-            raw = msg.content[0].text.strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            return json.loads(raw)
+            return json.loads(response.choices[0].message.content.strip())
 
         except Exception as e:
             logger.warning(f"CompanyResearchAgent error for {job.get('company')}: {e}")

@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import List
 
-import anthropic
+from openai import AsyncOpenAI
 
 from ..config import settings, load_user_profile
 
@@ -50,9 +50,9 @@ class FollowUpAgent:
     def __init__(self):
         self._client = None
 
-    def _get_client(self) -> anthropic.AsyncAnthropic:
+    def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
-            self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+            self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         return self._client
 
     async def get_pending_followups(
@@ -121,8 +121,7 @@ class FollowUpAgent:
 
     async def _generate(self, app) -> str:
         profile = load_user_profile()
-        personal = profile.get("Personal", {})
-        name = f"{personal.get('first_name', '')} {personal.get('last_name', '')}".strip()
+        name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
         days_since = (datetime.utcnow() - app.applied_at).days if app.applied_at else 7
 
         prompt = _PROMPT.format(
@@ -137,12 +136,15 @@ class FollowUpAgent:
 
         try:
             client = self._get_client()
-            msg = await client.messages.create(
-                model="claude-haiku-4-5-20251001",
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
                 max_tokens=350,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": "You write professional, concise follow-up emails. Plain text only."},
+                    {"role": "user", "content": prompt},
+                ],
             )
-            return msg.content[0].text.strip()
+            return response.choices[0].message.content.strip()
         except Exception as e:
             logger.warning(f"Follow-up generation error: {e}")
             return (

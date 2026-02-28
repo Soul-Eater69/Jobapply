@@ -11,9 +11,9 @@ Every 15 minutes:
   1. Scrape jobs from ATS APIs directly (Greenhouse, Lever, Ashby) — 2–24h before LinkedIn
   2. Monitor your target companies across ALL their ATS platforms simultaneously
   3. Run every job through an AI agent pipeline:
-       ├── Fit Scoring   (claude-sonnet-4-6: 0–100 score, skip if below threshold)
-       ├── Company Intel (claude-haiku: funding, culture, talking points)
-       └── Cover Letter  (claude-sonnet-4-6: tailored per job, saves to file)
+       ├── Fit Scoring   (gpt-4o: 0–100 score, skip if below threshold)
+       ├── Company Intel (gpt-4o-mini: funding, culture, talking points)
+       └── Cover Letter  (gpt-4o: tailored per job, saves to file)
   4. Rebuild your resume in AI for each role (ATS-optimized PDF, keyword-matched)
   5. Submit applications via stealth Playwright browser (anti-detection, cookie persistence)
   6. Track outcomes: follow-ups, recruiter replies, interviews, offers
@@ -67,7 +67,7 @@ The key insight: **LinkedIn is an aggregator — jobs appear there 2–24 hours 
 | **Tier 1** | Greenhouse API, Lever API, Ashby GraphQL, Remotive, Dice, ZipRecruiter | 2–24h before LinkedIn | Every 15 min |
 | **Tier 2** | Company Watchlist (all ATS) | Real-time monitoring of YOUR target companies | Every 15 min |
 | **Tier 3** | LinkedIn, Indeed, Glassdoor | Wide reach but high competition | Every 30 min |
-| **Tier 4** | Hiring Signal Detector (Claude) | Predicts roles BEFORE they're posted | Session startup |
+| **Tier 4** | Hiring Signal Detector (GPT) | Predicts roles BEFORE they're posted | Session startup |
 
 ### AI Agent Pipeline
 
@@ -77,17 +77,17 @@ Every scraped job passes through this pipeline before an application is submitte
 scraped job
     │
     ▼
-JobFitAgent (claude-sonnet-4-6)
+JobFitAgent (gpt-4o)
     │ Scores fit 0–100 against your profile
     │ If score < min_fit_score (default: 65) → dead-letter (skip)
     │
     ▼
-CompanyResearchAgent (claude-haiku)
+CompanyResearchAgent (gpt-4o-mini)
     │ Culture, tech stack, recent news, growth stage
     │ Results embedded into cover letter context
     │
     ▼
-CoverLetterAgent (claude-sonnet-4-6)
+CoverLetterAgent (gpt-4o)
     │ Personalized letter referencing company research
     │ Saved as .txt file + stored in DB
     │
@@ -187,8 +187,7 @@ nano user_profile.yaml
 
 ```bash
 # ── AI Keys ────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY=sk-ant-...      # Required: fit scoring, cover letters, signals
-OPENAI_API_KEY=sk-...             # Required: resume tailoring (GPT-4o)
+OPENAI_API_KEY=sk-proj-...        # Required: all AI features (resume, agents, signals)
 OPENAI_MODEL=gpt-4o               # Optional: default gpt-4o
 
 # ── Job Platform Credentials ───────────────────────────────────────────────
@@ -294,13 +293,13 @@ Key sections:
 jobapply/
 ├── backend/
 │   ├── agents/
-│   │   ├── job_fit.py           # Claude: 0–100 fit scoring per job
-│   │   ├── company_research.py  # Claude: company intel (culture, funding, news)
-│   │   ├── cover_letter.py      # Claude: personalized cover letter
-│   │   ├── followup.py          # Claude: follow-up email drafts
+│   │   ├── job_fit.py           # GPT:0–100 fit scoring per job
+│   │   ├── company_research.py  # GPT:company intel (culture, funding, news)
+│   │   ├── cover_letter.py      # GPT:personalized cover letter
+│   │   ├── followup.py          # GPT:follow-up email drafts
 │   │   ├── orchestrator.py      # Chains all agents; gates on fit score
-│   │   ├── signal_detector.py   # Claude: hiring signals (funding, headcount)
-│   │   └── outreach.py          # Claude: cold outreach (LinkedIn + email)
+│   │   ├── signal_detector.py   # GPT:hiring signals (funding, headcount)
+│   │   └── outreach.py          # GPT:cold outreach (LinkedIn + email)
 │   │
 │   ├── applier/
 │   │   ├── stealth_browser.py   # Playwright + 13 anti-detection layers
@@ -389,7 +388,7 @@ Scrapers produce jobs → job_heap (priority queue, newest first)
 
 ## Hiring Signal Detection
 
-At session startup, Claude analyzes your `target_companies` list for:
+At session startup, GPT analyzes your `target_companies` list for:
 
 - **Funding rounds** — Series A/B/C in the last 12 months signals headcount growth
 - **Executive hires** — New VP Eng / CTO / Head of Product signals team buildout

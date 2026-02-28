@@ -1,7 +1,7 @@
 """
 Job Fit Scoring Agent.
 
-Uses Claude to evaluate whether a job posting is worth applying to.
+Uses GPT to evaluate whether a job posting is worth applying to.
 Returns a fit score (0-100), verdict, and reasoning — replacing the
 "Human QA layer" with an AI decision layer.
 """
@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Optional
 
-import anthropic
+from openai import AsyncOpenAI
 
 from ..config import settings, load_user_profile
 
@@ -56,7 +56,7 @@ Scoring guide: 80-100 = strong match, 65-79 = reasonable match (apply),
 
 class JobFitAgent:
     """
-    Evaluates job-candidate fit using Claude.
+    Evaluates job-candidate fit using GPT-4o.
 
     Replaces human QA with an AI decision layer that reads the full JD,
     compares it against the candidate profile, and returns a structured
@@ -64,11 +64,11 @@ class JobFitAgent:
     """
 
     def __init__(self):
-        self._client: Optional[anthropic.AsyncAnthropic] = None
+        self._client: Optional[AsyncOpenAI] = None
 
-    def _get_client(self) -> anthropic.AsyncAnthropic:
+    def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
-            self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+            self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         return self._client
 
     async def evaluate(self, job: dict) -> dict:
@@ -95,18 +95,16 @@ class JobFitAgent:
 
         try:
             client = self._get_client()
-            msg = await client.messages.create(
-                model="claude-sonnet-4-6",
+            response = await client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
                 max_tokens=700,
-                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": "You are a job fit evaluator. Respond only with valid JSON."},
+                    {"role": "user", "content": prompt},
+                ],
             )
-            raw = msg.content[0].text.strip()
-            # Strip markdown code fences if present
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            data = json.loads(raw)
+            data = json.loads(response.choices[0].message.content.strip())
             return {
                 "fit_score": int(data.get("fit_score", 65)),
                 "verdict": data.get("verdict", "apply"),
@@ -130,19 +128,17 @@ class JobFitAgent:
 
 
 def _format_profile(profile: dict) -> str:
-    personal = profile.get("Personal", {})
-    prof = profile.get("Professional", {})
-    skills = profile.get("Skills", [])
-    experience = profile.get("Experience", [])
+    name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
+    experience = profile.get("experience", [])
 
     lines = [
-        f"Name: {personal.get('first_name', '')} {personal.get('last_name', '')}",
-        f"Current Role: {prof.get('current_role', 'Not specified')}",
-        f"Years of Experience: {prof.get('years_experience', 'Not specified')}",
-        f"Summary: {(prof.get('summary') or '')[:500]}",
-        f"Skills: {', '.join(skills[:40])}",
-        f"Desired Salary: {prof.get('desired_salary', 'Not specified')}",
-        f"Work Authorization: {prof.get('work_authorization', 'Not specified')}",
+        f"Name: {name}",
+        f"Current Role: {profile.get('current_role', 'Not specified')}",
+        f"Years of Experience: {profile.get('years_experience', 'Not specified')}",
+        f"Summary: {(profile.get('summary') or '')[:500]}",
+        f"Skills: {', '.join(profile.get('skills', [])[:40])}",
+        f"Desired Salary: {profile.get('desired_salary', 'Not specified')}",
+        f"Work Authorization: {profile.get('work_authorization', 'Not specified')}",
     ]
 
     if experience:

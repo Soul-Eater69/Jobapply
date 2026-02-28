@@ -5,12 +5,6 @@ Detects companies that are *about to hire* before a role is ever posted —
 based on observable signals: funding rounds, headcount growth, leadership
 changes, and company-specific "we're hiring" signals.
 
-This is "Tier 3" in the proactive sourcing strategy:
-  Tier 1: ATS direct scraping (hours before LinkedIn)
-  Tier 2: Company watchlist (real-time for target companies)
-  Tier 3: Signal detection (predict roles before they're posted)
-  Tier 4: Direct outreach (bypass postings entirely)
-
 Signals detected:
   - Recent funding rounds (Series A/B/C, growth capital)
   - Rapid LinkedIn headcount growth
@@ -19,13 +13,11 @@ Signals detected:
   - Company just launched a new product/feature (engineering surge predicted)
 """
 
-import asyncio
 import json
 import logging
-from datetime import datetime, timedelta
 from typing import List, Optional
 
-import anthropic
+from openai import AsyncOpenAI
 
 from ..config import settings
 
@@ -49,7 +41,7 @@ For each company, assess current hiring signals you know about:
 4. Product launches or major announcements suggesting engineering surge
 5. Overall hiring signal strength (high / medium / low / none)
 
-Return a JSON array (no markdown), one object per company that has a signal:
+Return a JSON array, one object per company that has a signal:
 [
   {{
     "company": "<name>",
@@ -69,16 +61,16 @@ data for a company, omit it entirely. Use your training data knowledge.
 
 class HiringSignalDetector:
     """
-    Uses Claude to identify companies showing hiring signals
+    Uses GPT to identify companies showing hiring signals
     before they post roles publicly.
     """
 
     def __init__(self):
-        self._client: Optional[anthropic.AsyncAnthropic] = None
+        self._client: Optional[AsyncOpenAI] = None
 
-    def _get_client(self) -> anthropic.AsyncAnthropic:
+    def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
-            self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+            self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         return self._client
 
     async def detect(
@@ -93,7 +85,7 @@ class HiringSignalDetector:
         Returns list of companies with active hiring signals, sorted by
         signal strength (high first).
         """
-        if not companies or not settings.ANTHROPIC_API_KEY:
+        if not companies or not settings.OPENAI_API_KEY:
             return []
 
         # Batch in groups of 20 to stay within token limits
@@ -122,17 +114,18 @@ class HiringSignalDetector:
 
         try:
             client = self._get_client()
-            msg = await client.messages.create(
-                model="claude-haiku-4-5-20251001",
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
                 max_tokens=1500,
-                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": 'You are a hiring signal analyst. Return a JSON object with a "signals" array.'},
+                    {"role": "user", "content": prompt},
+                ],
             )
-            raw = msg.content[0].text.strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            return json.loads(raw)
+            data = json.loads(response.choices[0].message.content.strip())
+            # The model returns {"signals": [...]} due to json_object mode
+            return data.get("signals", data) if isinstance(data, dict) else data
         except Exception as e:
             logger.warning(f"Signal detector error: {e}")
             return []
