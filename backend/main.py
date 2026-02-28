@@ -14,7 +14,10 @@ from sqlalchemy import func, desc
 
 from .database import init_db, get_db
 from .models import JobApplication
-from .schemas import JobApplicationOut, JobStats, AutomationConfig, RunStatus
+from .schemas import (
+    JobApplicationOut, JobStats, AutomationConfig, RunStatus,
+    FollowUpItem, OutcomeUpdate, AgentPipelineStats,
+)
 from .config import settings, BASE_DIR
 
 logging.basicConfig(level=logging.INFO)
@@ -108,6 +111,20 @@ def get_stats(db: Session = Depends(get_db)):
     today = db.query(func.count(JobApplication.id)).filter(JobApplication.applied_at >= today_start).scalar()
     this_week = db.query(func.count(JobApplication.id)).filter(JobApplication.applied_at >= week_start).scalar()
     avg_ats = db.query(func.avg(JobApplication.ats_score)).filter(JobApplication.ats_score.isnot(None)).scalar()
+    avg_fit = db.query(func.avg(JobApplication.fit_score)).filter(JobApplication.fit_score.isnot(None)).scalar()
+
+    # Tracking stats
+    pending_followups = db.query(func.count(JobApplication.id)).filter(
+        JobApplication.status == "applied",
+        JobApplication.followup_sent_at.is_(None),
+        JobApplication.recruiter_replied_at.is_(None),
+    ).scalar()
+    interviews = db.query(func.count(JobApplication.id)).filter(
+        JobApplication.outcome == "interview"
+    ).scalar()
+    offers = db.query(func.count(JobApplication.id)).filter(
+        JobApplication.outcome == "offer"
+    ).scalar()
 
     top_companies_raw = (
         db.query(JobApplication.company, func.count(JobApplication.id).label("count"))
@@ -141,9 +158,13 @@ def get_stats(db: Session = Depends(get_db)):
         today=today or 0,
         this_week=this_week or 0,
         avg_ats_score=round(avg_ats, 1) if avg_ats else None,
+        avg_fit_score=round(avg_fit, 1) if avg_fit else None,
         top_companies=top_companies,
         by_source=by_source,
         by_status=by_status,
+        pending_followups=pending_followups or 0,
+        interviews=interviews or 0,
+        offers=offers or 0,
     )
 
 
@@ -279,6 +300,145 @@ async def update_profile(data: dict):
     with open(PROFILE_PATH, "w") as f:
         yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
     return {"message": "Profile updated"}
+
+
+# ─── Agent & Tracking Endpoints ──────────────────────────────────────────────
+
+@app.get("/api/followups", response_model=List[FollowUpItem])
+async def get_followups(
+    after_days: int = Query(default=7, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """Return a list of applied jobs that need follow-up emails, with drafts."""
+    from .agents.followup import FollowUpAgent
+    agent = FollowUpAgent()
+    items = await agent.get_pending_followups(db, follow_up_after_days=after_days)
+    return [FollowUpItem(**item) for item in items]
+
+
+@app.post("/api/followups/{job_db_id}/sent")
+async def mark_followup_sent(job_db_id: int, db: Session = Depends(get_db)):
+    """Mark a follow-up email as sent for a job application."""
+    from .agents.followup import FollowUpAgent
+    agent = FollowUpAgent()
+    ok = await agent.mark_sent(db, job_db_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return {"message": "Follow-up marked as sent"}
+
+
+@app.post("/api/followups/{job_db_id}/replied")
+async def mark_recruiter_replied(job_db_id: int, db: Session = Depends(get_db)):
+    """Mark that a recruiter replied to an application."""
+    from .agents.followup import FollowUpAgent
+    agent = FollowUpAgent()
+    ok = await agent.mark_replied(db, job_db_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return {"message": "Recruiter reply recorded"}
+
+
+@app.patch("/api/jobs/{job_id}/outcome")
+async def update_outcome(
+    job_id: int,
+    body: OutcomeUpdate,
+    db: Session = Depends(get_db),
+):
+    """Update the outcome of a job application (interview, offer, rejected, etc.)."""
+    valid = {"pending", "interview", "rejected", "offer", "withdrawn"}
+    if body.outcome not in valid:
+        raise HTTPException(status_code=400, detail=f"outcome must be one of {valid}")
+
+    job = db.query(JobApplication).filter(JobApplication.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job.outcome = body.outcome
+    if body.notes:
+        job.notes = body.notes
+    db.commit()
+
+    await broadcast({"type": "log", "data": {
+        "message": f"Outcome updated: {job.title} @ {job.company} → {body.outcome}",
+        "level": "info",
+    }})
+    return {"message": "Outcome updated", "outcome": body.outcome}
+
+
+@app.get("/api/agents/stats", response_model=AgentPipelineStats)
+def get_agent_stats(db: Session = Depends(get_db)):
+    """Return aggregate statistics from the AI agent pipeline."""
+    total_evaluated = db.query(func.count(JobApplication.id)).filter(
+        JobApplication.fit_score.isnot(None)
+    ).scalar() or 0
+
+    approved = db.query(func.count(JobApplication.id)).filter(
+        JobApplication.fit_score >= settings.MIN_FIT_SCORE
+    ).scalar() or 0
+
+    skipped = total_evaluated - approved
+
+    avg_fit = db.query(func.avg(JobApplication.fit_score)).filter(
+        JobApplication.fit_score.isnot(None)
+    ).scalar()
+
+    cover_letters = db.query(func.count(JobApplication.id)).filter(
+        JobApplication.cover_letter_path.isnot(None)
+    ).scalar() or 0
+
+    followups_pending = db.query(func.count(JobApplication.id)).filter(
+        JobApplication.status == "applied",
+        JobApplication.followup_sent_at.is_(None),
+        JobApplication.recruiter_replied_at.is_(None),
+    ).scalar() or 0
+
+    followups_sent = db.query(func.count(JobApplication.id)).filter(
+        JobApplication.followup_sent_at.isnot(None)
+    ).scalar() or 0
+
+    recruiter_replies = db.query(func.count(JobApplication.id)).filter(
+        JobApplication.recruiter_replied_at.isnot(None)
+    ).scalar() or 0
+
+    interviews = db.query(func.count(JobApplication.id)).filter(
+        JobApplication.outcome == "interview"
+    ).scalar() or 0
+
+    offers = db.query(func.count(JobApplication.id)).filter(
+        JobApplication.outcome == "offer"
+    ).scalar() or 0
+
+    return AgentPipelineStats(
+        total_evaluated=total_evaluated,
+        approved=approved,
+        skipped=skipped,
+        avg_fit_score=round(avg_fit, 1) if avg_fit else None,
+        cover_letters_generated=cover_letters,
+        followups_pending=followups_pending,
+        followups_sent=followups_sent,
+        recruiter_replies=recruiter_replies,
+        interviews=interviews,
+        offers=offers,
+    )
+
+
+@app.get("/api/jobs/{job_id}/cover-letter")
+def get_cover_letter(job_id: int, db: Session = Depends(get_db)):
+    """Download the cover letter for a job application."""
+    job = db.query(JobApplication).filter(JobApplication.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not job.cover_letter_path:
+        raise HTTPException(status_code=404, detail="No cover letter generated for this application")
+    from pathlib import Path
+    path = Path(job.cover_letter_path)
+    if not path.exists():
+        # Return inline content if file is missing but content is stored
+        if job.cover_letter_content:
+            from fastapi.responses import PlainTextResponse
+            return PlainTextResponse(job.cover_letter_content)
+        raise HTTPException(status_code=404, detail="Cover letter file missing")
+    return FileResponse(str(path), media_type="text/plain", filename=path.name)
 
 
 # Serve frontend in production

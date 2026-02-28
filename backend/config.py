@@ -21,6 +21,13 @@ def load_user_profile() -> dict:
 class Settings:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
+
+    # Anthropic / Claude settings
+    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+
+    # Agent settings
+    MIN_FIT_SCORE: int = int(os.getenv("MIN_FIT_SCORE", "65"))
+    FOLLOWUP_AFTER_DAYS: int = int(os.getenv("FOLLOWUP_AFTER_DAYS", "7"))
     LINKEDIN_EMAIL: str = os.getenv("LINKEDIN_EMAIL", "")
     LINKEDIN_PASSWORD: str = os.getenv("LINKEDIN_PASSWORD", "")
     INDEED_EMAIL: str = os.getenv("INDEED_EMAIL", "")

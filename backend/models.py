@@ -33,6 +33,16 @@ class JobApplication(Base):
     notes = Column(Text)
     error_log = Column(Text)
 
+    # ── Agent Layer Fields ────────────────────────────────────────────────────
+    fit_score = Column(Float)                          # Agent job-fit score 0-100
+    fit_reasoning = Column(Text)                       # Agent reasoning text
+    company_research = Column(JSON)                    # Company intelligence dict
+    cover_letter_path = Column(String)                 # Path to cover letter .txt
+    cover_letter_content = Column(Text)                # Cover letter text (stored)
+    followup_sent_at = Column(DateTime)                # When follow-up email was sent
+    recruiter_replied_at = Column(DateTime)            # When recruiter responded
+    outcome = Column(String, default="pending")        # pending|interview|rejected|offer
+
 
 class UserConfig(Base):
     __tablename__ = "user_config"

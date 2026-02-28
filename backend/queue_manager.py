@@ -2,20 +2,29 @@
 Async Job Processing Queue.
 
 Architecture:
-  ┌─────────────────────────────────────────────────────────┐
-  │  Scrapers  →  job_queue  →  Resume Workers              │
-  │                        →  Apply Workers                 │
-  │                                                         │
-  │  Queues:                                                │
-  │    job_queue         (scraped jobs, priority: age)      │
-  │    resume_queue      (jobs with resume needed)          │
-  │    apply_queue       (jobs ready to apply)              │
-  │    dead_letter_queue (failed after max retries)         │
-  └─────────────────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  Scrapers  →  job_heap                                           │
+  │                  ↓ dispatcher                                    │
+  │             agent_queue  →  Agent Workers (AI decision layer)    │
+  │                  ↓ approved jobs only                            │
+  │             resume_queue  →  Resume Workers (AI resume gen)      │
+  │                  ↓                                               │
+  │             apply_queue   →  Apply Workers (stealth browser)     │
+  │                  ↓                                               │
+  │             Database + WebSocket broadcast                       │
+  │                                                                  │
+  │  Queues:                                                         │
+  │    job_heap      (scraped jobs, priority: age)                   │
+  │    agent_queue   (AI fit check → cover letter → company intel)   │
+  │    resume_queue  (approved jobs — build tailored ATS resume)     │
+  │    apply_queue   (resume built — submit application)             │
+  │    dead_letter   (permanent failures)                            │
+  └──────────────────────────────────────────────────────────────────┘
 
 Features:
   - Priority queue (newer jobs = higher priority)
-  - Per-domain rate limiting (LinkedIn: 1 req/3s, etc.)
+  - AI agent layer: job fit scoring, company research, cover letter
+  - Per-domain rate limiting (LinkedIn: 1 req/4s, etc.)
   - Retry with exponential backoff
   - Dead letter queue for permanent failures
   - Concurrency control (max N simultaneous applies)
@@ -83,14 +92,21 @@ class PriorityJobItem:
 # ─── Queue Manager ────────────────────────────────────────────────────────────
 
 class JobQueueManager:
-    def __init__(self, max_apply_workers: int = 2, max_resume_workers: int = 3):
+    def __init__(
+        self,
+        max_apply_workers: int = 2,
+        max_resume_workers: int = 3,
+        max_agent_workers: int = 2,
+    ):
         self._job_heap: List[PriorityJobItem] = []          # Raw scraped jobs
+        self._agent_queue: asyncio.Queue = asyncio.Queue(maxsize=300)  # Agent pipeline
         self._resume_queue: asyncio.Queue = asyncio.Queue(maxsize=200)
         self._apply_queue: asyncio.Queue = asyncio.Queue(maxsize=200)
         self._dead_letter: List[dict] = []
 
         self.max_apply_workers = max_apply_workers
         self.max_resume_workers = max_resume_workers
+        self.max_agent_workers = max_agent_workers
         self.rate_limiter = DomainRateLimiter()
 
         self._running = False
@@ -103,9 +119,12 @@ class JobQueueManager:
         self.on_applied: Optional[Callable] = None
         self.on_failed: Optional[Callable] = None
 
-        # Stats
+        # Stats (includes agent metrics)
         self.stats = {
             "queued": 0,
+            "agent_evaluated": 0,
+            "agent_approved": 0,
+            "agent_skipped": 0,
             "resumed_built": 0,
             "applied": 0,
             "failed": 0,
@@ -145,6 +164,14 @@ class JobQueueManager:
     ):
         self._running = True
 
+        # Start agent workers (AI decision layer — runs before resume building)
+        for i in range(self.max_agent_workers):
+            task = asyncio.create_task(
+                self._agent_worker(f"agent-{i}", config, broadcast),
+                name=f"agent-worker-{i}",
+            )
+            self._workers.append(task)
+
         # Start resume building workers
         for i in range(self.max_resume_workers):
             task = asyncio.create_task(
@@ -168,7 +195,11 @@ class JobQueueManager:
         )
         self._workers.append(task)
 
-        logger.info(f"Queue started: {self.max_resume_workers} resume workers, {self.max_apply_workers} apply workers")
+        logger.info(
+            f"Queue started: {self.max_agent_workers} agent workers, "
+            f"{self.max_resume_workers} resume workers, "
+            f"{self.max_apply_workers} apply workers"
+        )
 
     async def stop(self):
         self._running = False
@@ -179,7 +210,7 @@ class JobQueueManager:
         logger.info("Queue stopped")
 
     async def _dispatch_jobs(self, config):
-        """Pop jobs from priority queue and dispatch to resume_queue."""
+        """Pop jobs from priority queue and dispatch to agent_queue."""
         while self._running:
             item = self.pop_job()
             if item:
@@ -187,22 +218,66 @@ class JobQueueManager:
                     source = item.job.get("source", "default")
                     await self.rate_limiter.acquire(source)
 
-                    # Check deduplication limit
-                    applied_count = self.stats["applied"]
-                    if applied_count >= config.max_applications_per_run:
+                    # Check application limit
+                    if self.stats["applied"] >= config.max_applications_per_run:
                         logger.info("Max applications reached, pausing dispatcher")
                         await asyncio.sleep(60)
                         continue
 
-                    await self._resume_queue.put(item)
+                    # Jobs go to agent queue first (AI decision layer)
+                    await self._agent_queue.put(item)
                 except asyncio.QueueFull:
-                    # Put back in heap
                     heapq.heappush(self._job_heap, item)
                     await asyncio.sleep(5)
                 except asyncio.CancelledError:
                     break
             else:
                 await asyncio.sleep(2)
+
+    async def _agent_worker(self, worker_id: str, config, broadcast: Callable):
+        """
+        AI Agent pipeline worker.
+
+        Pulls jobs from agent_queue, runs the full orchestrator pipeline
+        (fit check → company research → cover letter), then pushes
+        approved jobs to resume_queue. Skipped jobs are discarded.
+        """
+        from .agents.orchestrator import AgentOrchestrator
+
+        orchestrator = AgentOrchestrator(
+            min_fit_score=int(getattr(config, "min_fit_score", 65))
+        )
+
+        while self._running:
+            try:
+                item: PriorityJobItem = await asyncio.wait_for(
+                    self._agent_queue.get(), timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+
+            job = item.job
+            try:
+                self.stats["agent_evaluated"] += 1
+                enriched = await orchestrator.process(job, broadcast=broadcast)
+
+                if enriched is None:
+                    # Agent decided to skip this job
+                    self.stats["agent_skipped"] += 1
+                else:
+                    # Agent approved — update job dict and push to resume queue
+                    item.job.update(enriched)
+                    self.stats["agent_approved"] += 1
+                    await self._resume_queue.put(item)
+
+            except Exception as e:
+                logger.error(f"[{worker_id}] Agent error: {e}", exc_info=True)
+                # Fail open: push to resume queue anyway
+                await self._resume_queue.put(item)
+            finally:
+                self._agent_queue.task_done()
 
     async def _resume_worker(self, worker_id: str, config, broadcast: Callable):
         """Pull from resume_queue, generate tailored resume, push to apply_queue."""
@@ -353,6 +428,7 @@ class JobQueueManager:
         return {
             **self.stats,
             "queue_size": self.queue_size,
+            "agent_queue_size": self._agent_queue.qsize(),
             "resume_queue_size": self._resume_queue.qsize(),
             "apply_queue_size": self._apply_queue.qsize(),
             "dead_letter_count": len(self._dead_letter),

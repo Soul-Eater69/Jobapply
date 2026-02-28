@@ -194,6 +194,12 @@ async def save_job(db: Session, job: dict, status: str, failure_reason: str = No
         matched_skills=job.get("matched_skills"),
         required_skills=job.get("required_skills"),
         ats_score=job.get("ats_score"),
+        # Agent fields
+        fit_score=job.get("fit_score"),
+        fit_reasoning=(job.get("fit_reasoning") or "")[:1000],
+        company_research=job.get("company_research"),
+        cover_letter_path=job.get("cover_letter_path"),
+        cover_letter_content=(job.get("cover_letter_content") or "")[:8000],
     )
     db.add(record)
     db.commit()
