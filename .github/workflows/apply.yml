@@ -1,0 +1,131 @@
+name: JobApply Automation
+
+on:
+  # Run every hour, 8am–10pm UTC (adjust to your timezone)
+  schedule:
+    - cron: "0 8-22 * * 1-5"   # Weekdays only, every hour 8am–10pm UTC
+
+  # Allow manual trigger from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      max_applications:
+        description: "Max applications this run"
+        default: "10"
+        required: false
+      sources:
+        description: "Comma-separated sources (greenhouse,lever,ashby,linkedin,indeed)"
+        default: "greenhouse,lever,ashby"
+        required: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55    # Stay under the 60-min GitHub Actions job limit
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Restore persistent data (DB, sessions, resumes) from cache ────────
+      - name: Restore application data cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            jobapply.db
+            sessions/
+            resumes/
+            cover_letters/
+          key: jobapply-data-${{ github.ref_name }}
+          restore-keys: |
+            jobapply-data-
+
+      # ── Write user_profile.yaml from secret ──────────────────────────────
+      - name: Write user profile
+        run: echo "${{ secrets.USER_PROFILE_YAML }}" > user_profile.yaml
+
+      # ── Python setup ─────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install chromium --with-deps
+
+      # ── Run one automation cycle ──────────────────────────────────────────
+      - name: Run job automation
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'llama-3.3-70b-versatile' }}
+          LINKEDIN_EMAIL: ${{ secrets.LINKEDIN_EMAIL }}
+          LINKEDIN_PASSWORD: ${{ secrets.LINKEDIN_PASSWORD }}
+          INDEED_EMAIL: ${{ secrets.INDEED_EMAIL }}
+          INDEED_PASSWORD: ${{ secrets.INDEED_PASSWORD }}
+          MIN_FIT_SCORE: ${{ secrets.MIN_FIT_SCORE || '65' }}
+          HEADLESS: "true"
+        run: |
+          python -c "
+          import asyncio, json
+          from backend.database import init_db, SessionLocal
+          from backend.scheduler import run_automation_loop
+          from backend.schemas import AutomationConfig
+
+          async def main():
+              init_db()
+              db = SessionLocal()
+              state = {'running': True, 'jobs_found': 0, 'jobs_applied': 0,
+                       'jobs_failed': 0, 'current_action': 'idle',
+                       'started_at': None, 'last_check': None}
+
+              sources_input = '${{ github.event.inputs.sources || 'greenhouse,lever,ashby' }}'
+              sources = [s.strip() for s in sources_input.split(',')]
+
+              config = AutomationConfig(
+                  search_keywords=['software engineer', 'backend engineer', 'fullstack engineer'],
+                  locations=['Remote', 'San Francisco', 'New York'],
+                  sources=sources,
+                  max_applications_per_run=int('${{ github.event.inputs.max_applications || '10' }}'),
+                  check_interval_minutes=999,   # Single cycle — scheduler loop runs once then exits
+                  auto_apply=True,
+                  min_fit_score=65,
+              )
+
+              async def broadcast(msg):
+                  action = msg.get('data', {}).get('current_action') or msg.get('data', {}).get('message', '')
+                  if action:
+                      print(action)
+
+              # Run one cycle then stop
+              import signal, asyncio
+              async def run_once():
+                  task = asyncio.create_task(run_automation_loop(config, db, state, broadcast))
+                  await asyncio.sleep(45 * 60)   # 45 minutes max per cycle
+                  task.cancel()
+                  try:
+                      await task
+                  except asyncio.CancelledError:
+                      pass
+
+              await run_once()
+              db.close()
+              print(f'Done — applied: {state[\"jobs_applied\"]}, failed: {state[\"jobs_failed\"]}')
+
+          asyncio.run(main())
+          "
+
+      # ── Save updated DB + sessions back to cache ──────────────────────────
+      - name: Save application data cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            jobapply.db
+            sessions/
+            resumes/
+            cover_letters/
+          key: jobapply-data-${{ github.ref_name }}-${{ github.run_id }}
