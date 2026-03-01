@@ -3,6 +3,7 @@ import { getStats, startAutomation, stopAutomation } from '../api.js'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { Play, Square, RefreshCw, TrendingUp, CheckCircle2, XCircle, Clock, Target, Zap } from 'lucide-react'
 import clsx from 'clsx'
+import { DEFAULT_CONFIG } from '../defaults.js'
 
 const STATUS_COLORS = {
   applied: '#10b981',
@@ -71,7 +72,8 @@ export default function Dashboard({ context }) {
   }, [])
 
   const handleStart = async () => {
-    const config = JSON.parse(localStorage.getItem('jobapply_config') || '{}')
+    const saved = localStorage.getItem('jobapply_config')
+    const config = saved ? { ...DEFAULT_CONFIG, ...JSON.parse(saved) } : DEFAULT_CONFIG
     if (!config.search_keywords?.length) {
       alert('Please configure your job search settings first (Settings tab)')
       return

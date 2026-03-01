@@ -1,0 +1,16 @@
+export const DEFAULT_CONFIG = {
+  search_keywords: ['software engineer', 'backend developer'],
+  locations: ['United States', 'Remote'],
+  target_companies: [],
+  blocked_companies: [],
+  job_types: ['full-time'],
+  max_applications_per_run: 20,
+  max_applications_per_day: 50,
+  check_interval_minutes: 30,
+  min_ats_score: 60,
+  auto_apply: true,
+  remote_only: false,
+  salary_min: null,
+  experience_level: ['mid', 'senior'],
+  sources: ['linkedin', 'indeed', 'glassdoor', 'dice', 'remotive'],
+}

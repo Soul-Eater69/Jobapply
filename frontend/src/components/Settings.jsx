@@ -1,23 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getProfile, updateProfile } from '../api.js'
 import { Save, Plus, X, User, Briefcase, Code, GraduationCap, Key } from 'lucide-react'
-
-const DEFAULT_CONFIG = {
-  search_keywords: ['software engineer', 'backend developer'],
-  locations: ['United States', 'Remote'],
-  target_companies: [],
-  blocked_companies: [],
-  job_types: ['full-time'],
-  max_applications_per_run: 20,
-  max_applications_per_day: 50,
-  sources: ['linkedin', 'indeed', 'glassdoor', 'dice', 'remotive'],
-  check_interval_minutes: 30,
-  min_ats_score: 60,
-  auto_apply: true,
-  remote_only: false,
-  salary_min: null,
-  experience_level: ['mid', 'senior'],
-}
+import { DEFAULT_CONFIG } from '../defaults.js'
 
 const ALL_SOURCES = ['linkedin', 'indeed', 'glassdoor', 'dice', 'remotive', 'weworkremotely', 'ziprecruiter', 'greenhouse']
 const ALL_JOB_TYPES = ['full-time', 'part-time', 'contract', 'internship']
