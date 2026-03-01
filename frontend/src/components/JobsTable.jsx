@@ -348,15 +348,4 @@ function JobDetailModal({ job, onClose }) {
   )
 }
 
-function ATSBar({ score }) {
-  if (!score) return <span className="text-gray-600 text-xs">—</span>
-  const color = score >= 80 ? 'bg-emerald-500' : score >= 60 ? 'bg-yellow-500' : 'bg-red-500'
-  return (
-    <div className="flex items-center gap-2">
-      <div className="w-20 h-2 bg-gray-800 rounded-full overflow-hidden">
-        <div className={clsx('h-full rounded-full', color)} style={{ width: `${score}%` }} />
-      </div>
-      <span className="text-xs text-gray-400">{score.toFixed(0)}%</span>
-    </div>
-  )
-}
+
