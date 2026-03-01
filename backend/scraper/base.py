@@ -92,13 +92,24 @@ class BaseScraper:
         return None
 
     async def _fetch_json(self, url: str, params: dict = None) -> Optional[dict]:
+        import gzip as _gzip
+        import json as _json
         session = await self._get_session()
-        session.headers.update({"Accept": "application/json, text/plain, */*"})
+        session.headers.update({
+            "Accept": "application/json, text/plain, */*",
+            # Don't advertise compression for JSON calls; some servers return raw gzip
+            # that httpx won't auto-decompress when the header was set manually.
+            "Accept-Encoding": "identity",
+        })
         try:
             await asyncio.sleep(random.uniform(1.0, 3.0))
             resp = await session.get(url, params=params)
             resp.raise_for_status()
-            return resp.json()
+            content = resp.content
+            # Fallback: decompress if server ignored Accept-Encoding and sent gzip anyway
+            if content[:2] == b'\x1f\x8b':
+                content = _gzip.decompress(content)
+            return _json.loads(content)
         except Exception as e:
             logger.error(f"JSON fetch error {url}: {e}")
             return None

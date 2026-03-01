@@ -72,10 +72,17 @@ class DiceScraper(BaseScraper):
 
         session = await self._get_session()
         session.headers.update({
-            "x-api-key": "1YAt0R9wBg4WI4eScpvxnil34sSiau5A",  # Public Dice API key
-            "Accept": "application/json",
+            "x-api-key": "1YAt0R9wBg4WI4eScpvxnil34sSiau5A",
+            "Accept": "application/json, text/plain, */*",
             "Origin": "https://www.dice.com",
-            "Referer": "https://www.dice.com/",
+            "Referer": "https://www.dice.com/jobs",
+            # XHR/fetch headers — must match what a browser sends for cross-site API calls
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
         })
 
         data = await self._fetch_json(self.API_URL, params=params)
