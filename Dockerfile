@@ -4,8 +4,9 @@
 FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm ci --silent
+COPY frontend/package.json ./
+# Use npm install (works with or without a lock file)
+RUN npm install --silent
 
 COPY frontend/ ./
 RUN npm run build
@@ -20,32 +21,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl wget gnupg ca-certificates \
     libglib2.0-0 libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
     libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
-    libxfixes3 libxrandr2 libgbm1 libasound2 \
+    libxfixes3 libxrandr2 libgbm1 \
     fonts-liberation fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install Python dependencies first (cache layer)
+# Install Python dependencies (cached layer)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browser (Chromium only — keeps image lean)
-RUN playwright install chromium --with-deps 2>/dev/null || playwright install chromium
+# Install Playwright Chromium
+RUN playwright install chromium --with-deps
 
 # Copy backend source
 COPY backend/ ./backend/
 
-# Copy built frontend assets into the location FastAPI serves them from
+# Copy built frontend
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Persistent data volumes (sessions, resumes, cover letters, DB)
-VOLUME ["/app/sessions", "/app/resumes", "/app/cover_letters"]
+# Bake in a default user profile — overridable by volume mount at runtime
+COPY user_profile.yaml ./user_profile.default.yaml
 
-# User profile and env are mounted at runtime
+# Entrypoint handles dir creation + profile fallback
+COPY docker-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 EXPOSE 8000
 
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
