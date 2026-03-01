@@ -1,0 +1,6 @@
+# Ensure shell scripts always use LF line endings on checkout (prevents
+# "exec: no such file or directory" errors when building on Windows)
+*.sh text eol=lf
+
+# Treat all other text files normally
+* text=auto

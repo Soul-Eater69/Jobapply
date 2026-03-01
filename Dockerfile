@@ -53,7 +53,8 @@ COPY user_profile.yaml ./user_profile.default.yaml
 
 # Entrypoint handles dir creation + profile fallback
 COPY docker-entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Strip Windows CRLF line endings in case the file was checked out on Windows
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
